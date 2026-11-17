@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #262421;
+  color: #f5f5f4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.board-layout-shell {
+  --board-size: min(calc(100vw - 3rem), calc(100dvh - 18rem), 700px);
+}
+
+@media (min-width: 1024px) {
+  .board-layout-shell {
+    --board-size: min(
+      calc(100vw - 43rem),
+      calc(100dvh - 14rem),
+      700px
+    );
+  }
+}
+
+.dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+.eval-water::before {
+  position: absolute;
+  top: -4px;
+  left: -50%;
+  width: 200%;
+  height: 8px;
+  border-radius: 45%;
+  background: inherit;
+  content: "";
+  animation: eval-wave 3.2s linear infinite;
+}
+
+@keyframes eval-wave {
+  from { transform: translateX(0) rotate(0deg); }
+  to { transform: translateX(25%) rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
