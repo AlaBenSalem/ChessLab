@@ -1,12 +1,25 @@
-﻿node_modules/
-npm-debug.log*
+﻿# Dependencies
+node_modules/
+
+# Build output
 dist/
 build/
-.vite/
+
+# Environment variables
 .env
-.env.local
+.env.*
+!.env.example
+
+# Logs
 *.log
+
+# Cache
+.cache/
+.vite/
+coverage/
+
+# OS and editor files
 .DS_Store
 Thumbs.db
-.vscode/
 .idea/
+.vscode/

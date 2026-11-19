@@ -246,10 +246,6 @@ export function useGameAnalysis(chess: Chess, displayFen: string): GameAnalysis 
     engineRef.current = null;
   }, []);
 
-  useEffect(() => {
-    setSingleEval((current) => current?.fen === displayFen ? current : null);
-  }, [displayFen]);
-
   const currentHistory = chess.history({ verbose: true });
   const currentStartFen = chess.header().FEN ?? new Chess().fen();
   const currentGameKey = `${currentStartFen}|${currentHistory

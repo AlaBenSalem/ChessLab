@@ -292,7 +292,7 @@ export class StockfishEngine {
       const lines = new Map<number, EngineLine>();
       let done = false;
       let stopReason: "abort" | "timeout" | null = null;
-      let softTimer: ReturnType<typeof setTimeout> | undefined;
+      const softTimer: ReturnType<typeof setTimeout> = setTimeout(() => requestStop("timeout"), timeoutMs);
       let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
       const finish = (settle: () => void) => {
@@ -416,8 +416,6 @@ export class StockfishEngine {
 
       worker.addEventListener("message", onMessage);
       worker.addEventListener("error", onError);
-      softTimer = setTimeout(() => requestStop("timeout"), timeoutMs);
-
       worker.postMessage(`position fen ${fen}`);
       const limit = options.nodes ? `nodes ${options.nodes}` : `depth ${depth}`;
       const searchMoves = options.searchMove

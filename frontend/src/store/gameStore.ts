@@ -13,8 +13,14 @@ interface GameState {
   selectedSquare: Square | null;
   legalMoves: Square[];
   lastMove: { from: Square; to: Square } | null;
+  /** True after a PGN import until the user plays a new move or restarts. */
+  isImported: boolean;
   selectSquare: (square: Square) => void;
-  movePiece: (from: Square, to: Square, promotion?: "q" | "r" | "b" | "n") => boolean;
+  movePiece: (
+    from: Square,
+    to: Square,
+    promotion?: "q" | "r" | "b" | "n",
+  ) => boolean;
   resetGame: () => void;
   setViewIndex: (index: number) => void;
   firstMove: () => void;
@@ -32,7 +38,8 @@ const numberMoves = (moves: Move[], startingFen: string): HistoryMove[] => {
   const startsWithBlack = fields[1] === "b";
   moves.forEach((move, index) => {
     Object.assign(move, {
-      moveNumber: startingNumber + Math.floor((index + (startsWithBlack ? 1 : 0)) / 2),
+      moveNumber:
+        startingNumber + Math.floor((index + (startsWithBlack ? 1 : 0)) / 2),
       ply: index,
     });
   });
@@ -46,7 +53,8 @@ const currentLastMove = (moves: HistoryMove[], viewIndex: number) => {
 
 const playMoveSound = (positionAfter: Chess, move: Move) => {
   if (positionAfter.isCheckmate()) playSound("checkmate");
-  else if (positionAfter.isDraw() || positionAfter.isStalemate()) playSound("draw");
+  else if (positionAfter.isDraw() || positionAfter.isStalemate())
+    playSound("draw");
   else if (positionAfter.inCheck()) playSound("check");
   else if (move.san.includes("O-O")) playSound("castle");
   else if (move.promotion) playSound("promote");
@@ -64,6 +72,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   selectedSquare: null,
   legalMoves: [],
   lastMove: null,
+  isImported: false,
 
   movePiece: (from, to, promotion = "q") => {
     unlockAudio();
@@ -82,6 +91,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         selectedSquare: null,
         legalMoves: [],
         lastMove: { from: move.from, to: move.to },
+        isImported: false,
       });
       return true;
     } catch {
@@ -101,7 +111,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     const piece = chess.get(square);
     if (piece && piece.color === chess.turn()) {
       playSound("select");
-      const legalMoves = chess.moves({ square, verbose: true }).map((move) => move.to);
+      const legalMoves = chess
+        .moves({ square, verbose: true })
+        .map((move) => move.to);
       set({ selectedSquare: square, legalMoves });
     } else {
       set({ selectedSquare: null, legalMoves: [] });
@@ -111,7 +123,16 @@ export const useGameStore = create<GameState>((set, get) => ({
   resetGame: () => {
     const chess = new Chess();
     playSound("start");
-    set({ chess, fen: chess.fen(), moves: [], viewIndex: -1, selectedSquare: null, legalMoves: [], lastMove: null });
+    set({
+      chess,
+      fen: chess.fen(),
+      moves: [],
+      viewIndex: -1,
+      selectedSquare: null,
+      legalMoves: [],
+      lastMove: null,
+      isImported: false,
+    });
   },
 
   setViewIndex: (requestedIndex) => {
@@ -127,7 +148,12 @@ export const useGameStore = create<GameState>((set, get) => ({
         playMoveSound(position, stepMove);
       }
     }
-    set({ viewIndex: index, selectedSquare: null, legalMoves: [], lastMove: currentLastMove(moves, index) });
+    set({
+      viewIndex: index,
+      selectedSquare: null,
+      legalMoves: [],
+      lastMove: currentLastMove(moves, index),
+    });
   },
   firstMove: () => get().setViewIndex(-1),
   previousMove: () => get().setViewIndex(get().viewIndex - 1),
@@ -160,13 +186,27 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (!pgn.trim()) return "Paste a PGN game first.";
       const chess = new Chess();
       chess.loadPgn(pgn);
-      const moves = numberMoves(chess.history({ verbose: true }), chess.header().FEN ?? new Chess().fen());
+      const moves = numberMoves(
+        chess.history({ verbose: true }),
+        chess.header().FEN ?? new Chess().fen(),
+      );
       if (!moves.length) return "The PGN contains no moves.";
       const viewIndex = moves.length - 1;
-      set({ chess, fen: chess.fen(), moves, viewIndex, selectedSquare: null, legalMoves: [], lastMove: currentLastMove(moves, viewIndex) });
+      set({
+        chess,
+        fen: chess.fen(),
+        moves,
+        viewIndex,
+        selectedSquare: null,
+        legalMoves: [],
+        lastMove: currentLastMove(moves, viewIndex),
+        isImported: true,
+      });
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : "Could not read this PGN.";
+      return error instanceof Error
+        ? error.message
+        : "Could not read this PGN.";
     }
   },
 }));
