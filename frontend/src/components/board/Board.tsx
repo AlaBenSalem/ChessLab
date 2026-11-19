@@ -5,8 +5,8 @@ import {
   Bell,
   Clock,
   Cpu,
-  Download,
   FastForward,
+  FileDown,
   Flag,
   FlipHorizontal2,
   Gauge,
@@ -15,7 +15,6 @@ import {
   Rewind,
   Swords,
   Trophy,
-  Upload,
   User,
   Volume2,
   VolumeX,
@@ -37,6 +36,7 @@ import {
   loadOpeningBook,
 } from "../../lib/openingBook";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { PgnExportButton } from "./PgnExportButton";
 import { EvalBar } from "../EvalBar/EvalBarr";
 import { MoveBadge } from "../badges/MoveBadge";
 import {
@@ -279,6 +279,9 @@ export function Board() {
     movePiece,
     resetGame,
     setViewIndex,
+    previousMove,
+    nextMove,
+    undoMove,
     lastMoveInHistory,
     loadPgn,
   } = useGameStore();
@@ -313,9 +316,6 @@ export function Board() {
   const [pgnOpen, setPgnOpen] = useState(false);
   const [pgnInput, setPgnInput] = useState("");
   const [pgnError, setPgnError] = useState<string | null>(null);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportPgn, setExportPgn] = useState("");
-  const [exportMessage, setExportMessage] = useState("");
   const engineRef = useRef<StockfishEngine | null>(null);
   const observedPly = useRef(0);
   const moveListRef = useRef<HTMLDivElement | null>(null);
@@ -530,34 +530,6 @@ export function Board() {
       exported.move({ from: move.from, to: move.to, promotion: move.promotion });
     });
     return exported.pgn({ maxWidth: 80, newline: "\n" });
-  };
-
-  const openPgnExport = () => {
-    setExportPgn(buildExportPgn());
-    setExportMessage("");
-    setExportOpen(true);
-  };
-
-  const copyExportPgn = async () => {
-    try {
-      await navigator.clipboard.writeText(exportPgn);
-      setExportMessage("PGN copied to clipboard.");
-    } catch {
-      setExportMessage("Clipboard access is unavailable here. Use Download PGN instead.");
-    }
-  };
-
-  const downloadExportPgn = () => {
-    const blob = new Blob([exportPgn], { type: "application/x-chess-pgn;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `chesslab-${new Date().toISOString().slice(0, 10)}.pgn`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    setExportMessage("PGN downloaded.");
   };
 
   useEffect(() => {
@@ -1149,8 +1121,9 @@ export function Board() {
           active={pgnOpen}
           onClick={() => setPgnOpen((open) => !open)}
         >
-          <Upload size={22} />
+          <FileDown size={22} />
         </RailButton>
+        <PgnExportButton disabled={moves.length === 0} moveCount={moves.length} getPgn={buildExportPgn} />
         <div className="flex-1" />
         <RailButton
           label={showEval ? "Hide evaluation bar" : "Show evaluation bar"}
@@ -1236,8 +1209,11 @@ export function Board() {
               >
                 <NavButton
                   label="Previous move"
-                  disabled={viewIndex < 0}
-                  onClick={() => setViewIndex(Math.max(-1, viewIndex - 1))}
+                  disabled={computerMode ? viewIndex < 0 : moves.length === 0}
+                  onClick={() => {
+                    if (computerMode) previousMove();
+                    else undoMove();
+                  }}
                 >
                   <Rewind size={26} />
                 </NavButton>
@@ -1258,11 +1234,9 @@ export function Board() {
                   <Flag size={24} />
                 </NavButton>
                 <NavButton
-                  label="Next move"
+                  label="Forward move"
                   disabled={!viewingHistory}
-                  onClick={() =>
-                    setViewIndex(Math.min(moves.length - 1, viewIndex + 1))
-                  }
+                  onClick={nextMove}
                 >
                   <FastForward size={26} />
                 </NavButton>
@@ -1351,14 +1325,6 @@ export function Board() {
                     >
                       Exit game
                     </button>
-                    <button
-                      type="button"
-                      onClick={openPgnExport}
-                      disabled={moves.length === 0}
-                      className={`${SECONDARY_BTN} inline-flex items-center justify-center gap-1 disabled:opacity-40`}
-                    >
-                      <Download size={15} /> PGN
-                    </button>
                   </div>
                 ) : (
                   <div className="mt-3">
@@ -1367,14 +1333,6 @@ export function Board() {
                       placeholder="Message…"
                       className="w-full border-t border-white/10 bg-transparent px-1 pt-3 text-[15px] text-stone-100 outline-none placeholder:text-stone-500 focus:border-emerald-400/60"
                     />
-                    <button
-                      type="button"
-                      onClick={openPgnExport}
-                      disabled={moves.length === 0}
-                      className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 py-2.5 text-sm font-semibold text-stone-100 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <Download size={17} /> Export PGN
-                    </button>
                   </div>
                 )}
               </section>
@@ -1909,56 +1867,6 @@ export function Board() {
                 {pgnError}
               </p>
             )}
-          </section>
-        </div>
-      )}
-      {exportOpen && (
-        <div className="fixed inset-0 z-40 grid place-items-center bg-black/65 p-4 backdrop-blur-sm">
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="export-pgn-title"
-            className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#242424] p-5 shadow-2xl sm:p-6"
-          >
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 text-emerald-300">
-                  <Download size={18} />
-                  <h2 id="export-pgn-title" className="text-lg font-extrabold text-white">Export game</h2>
-                </div>
-                <p className="mt-1 text-sm text-stone-400">Portable Game Notation · {moves.length} plies</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setExportOpen(false)}
-                className="rounded-lg px-3 py-2 text-sm text-stone-300 transition-colors hover:bg-white/10 hover:text-white"
-              >
-                Close
-              </button>
-            </div>
-            <textarea
-              readOnly
-              value={exportPgn}
-              aria-label="PGN export text"
-              className="h-64 w-full resize-y rounded-xl border border-white/10 bg-[#171717] p-3 font-mono text-xs leading-relaxed text-stone-200 outline-none focus:border-emerald-400/50"
-            />
-            <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => void copyExportPgn()}
-                className="rounded-lg border border-white/10 px-4 py-2.5 text-sm font-semibold text-stone-200 transition-colors hover:bg-white/10"
-              >
-                Copy PGN
-              </button>
-              <button
-                type="button"
-                onClick={downloadExportPgn}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-emerald-500"
-              >
-                <Download size={16} /> Download .pgn
-              </button>
-            </div>
-            <p role="status" aria-live="polite" className="mt-2 min-h-5 text-right text-xs text-emerald-300">{exportMessage}</p>
           </section>
         </div>
       )}

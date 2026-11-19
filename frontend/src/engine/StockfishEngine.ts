@@ -1,9 +1,8 @@
-// 🔴 Tell Vite to treat these as raw URLs
 import stockfishJsUrl from "./stockfish.js?url";
 import stockfishWasmUrl from "./stockfish.wasm?url";
 import { Chess } from "chess.js";
 
-// Keep the engine's companion WASM file in Vite's emitted assets.
+
 void stockfishWasmUrl;
 
 export interface EngineEvaluation {
@@ -27,18 +26,11 @@ export interface EvaluateOptions {
   nodes?: number;
   elo?: number;
   skillLevel?: number;
-  /**
-   * Time budget for this search (default 10s). When it runs out the engine is
-   * told to stop and the best result found so far is returned; check
-   * `depth` on the result if you need to know how deep it got.
-   */
   timeoutMs?: number;
 }
 
 export interface StockfishEngineOptions {
-  /** Log every UCI line from the engine. Very noisy, so off by default. */
   debug?: boolean;
-  /** How long the engine gets to answer `stop` before it is restarted. Default 3s. */
   stopGraceMs?: number;
 }
 
@@ -80,15 +72,11 @@ interface ActiveSearch {
 export class StockfishEngine {
   private worker!: Worker;
   private readyPromise!: Promise<void>;
-  /** Tears down the current worker. Set by spawn(). */
   private discardWorker!: (reason: Error) => void;
   private activeSearch: ActiveSearch | null = null;
-  /** Searches run strictly one at a time, in the order they were requested. */
   private queue: Promise<unknown> = Promise.resolve();
-  /** Id of the newest evaluate() call. Older calls that haven't started yet are dropped. */
   private latestRequest = 0;
   private disposed = false;
-  /** Engine options already sent to the current worker (it forgets them on restart). */
   private applied: { skill: number; elo: number | undefined } = {
     skill: FULL_STRENGTH_SKILL,
     elo: undefined,
@@ -129,9 +117,6 @@ export class StockfishEngine {
       throw new Error(`Illegal constrained search move: ${options.searchMove}`);
     }
 
-    // Everything up to `return run` happens synchronously, so concurrent callers
-    // are ordered exactly as they called. The newest request wins: it stops the
-    // running search, and any older request still waiting its turn is dropped.
     const id = ++this.latestRequest;
     this.cancelCurrent();
     const run = this.queue.then(() => this.run(id, fen, depth, options));
@@ -168,8 +153,6 @@ export class StockfishEngine {
       resolveReady = resolve;
       rejectReady = reject;
     });
-    // Callers see the rejection when they await it; this only stops it being
-    // reported as unhandled while nobody is awaiting yet.
     ready.catch(() => undefined);
     this.readyPromise = ready;
 

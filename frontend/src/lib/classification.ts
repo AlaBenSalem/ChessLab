@@ -31,8 +31,12 @@ export const REVIEW_THRESHOLDS = {
    * table gives Best a loss of exactly 0.00; this absorbs ties and 1cp noise.
    */
   bestEpsilon: 0.001,
-  /** Brilliant: you must not be left in a bad position (expected points >= 0.5). */
-  brilliantEqualOrBetter: 0.5,
+  /**
+   * Brilliant: you must not be left in a bad position. 0.5 is dead equal; the
+   * small tolerance stops a sacrifice that lands on 0.00 or a hair worse (a
+   * perpetual, a fortress) from failing on a rounding-level difference.
+   */
+  brilliantEqualOrBetter: 0.45,
   /** Brilliant: you must not have been completely winning without the move (< 0.9). */
   brilliantNotAlreadyWinning: 0.9,
 } as const;
@@ -55,9 +59,21 @@ export const SPECIAL_MOVE_RULES = {
    * the best alternative. Interpolated by rating: beginners get the smaller gap.
    */
   greatOnlyMoveGapBeginner: 0.1,
-  greatOnlyMoveGapStrong: 0.2,
+  greatOnlyMoveGapStrong: 0.15,
   /** Great (outcome change): smaller gap, but the move must lift the outcome band. */
   greatOutcomeChangeGap: 0.1,
+
+  /**
+   * Great (free material): taking a piece the opponent just left hanging.
+   * OFF by default: Chess.com does not document this as a Great rule (Great is
+   * "critical": only good move, or it changes the outcome band), and a free
+   * capture only earns Great there when the alternatives were much worse,
+   * which the rules above already catch. Flip it on if you want every free
+   * capture of a hung piece praised.
+   */
+  freeCaptureIsGreat: false as boolean,
+  /** Net material (in pawns) the capture must win by the end of the line. */
+  freeCaptureMin: 3,
 
   /** Miss: the move must lose at least this much (more than a "Good" move)... */
   missMinLoss: 0.05,
@@ -214,6 +230,13 @@ export function classifyMove(params: {
 export interface MaterialSwing {
   before: number;
   after: number;
+  /**
+   * Optional: the lowest balance at any quiet point along the line. Without it
+   * a sacrifice that wins its material back before the line ends (queen for a
+   * mating attack that nets a rook, say) looks like a plain trade and misses
+   * Brilliant. With it, the deepest point of the sacrifice is what counts.
+   */
+  lowest?: number;
 }
 
 /** Everything the detectors need, already converted to expected points. */
@@ -247,7 +270,52 @@ export function isPieceSacrifice(
   material: MaterialSwing,
   rating: number = DEFAULT_RATING,
 ): boolean {
-  return material.before - material.after >= minSacrificeValue(rating);
+  const trough = Math.min(material.after, material.lowest ?? material.after);
+  return material.before - trough >= minSacrificeValue(rating);
+}
+
+const pct = (ep: number) => `${(ep * 100).toFixed(1)}%`;
+
+/**
+ * What the player could have done instead of the played move: the best line
+ * that is not the played move. An explicit non-sacrifice line wins; otherwise
+ * the engine's other candidate stands in (line 2 if the played move was line 1,
+ * line 1 if it wasn't). Undefined when the engine gave us nothing to compare.
+ */
+function alternativeToPlayed(signals: MoveSignals): number | undefined {
+  if (signals.alternativeEp !== undefined) return signals.alternativeEp;
+  return signals.isBestMove ? signals.secondBestEp : signals.bestEp;
+}
+
+/**
+ * Why a move is NOT Brilliant, or null when it is. Single source of truth for
+ * `isBrilliantMove`, and surfaced in the classification result so a missed
+ * Brilliant can be traced to the exact gate that rejected it.
+ */
+export function brilliantRejection(signals: MoveSignals): string | null {
+  if (!signals.material) return "no material data (Brilliant needs `material`)";
+  if (!isPieceSacrifice(signals.material, signals.rating)) {
+    const { before, after, lowest } = signals.material;
+    const change = Math.min(after, lowest ?? after) - before;
+    return `not a sacrifice: material change is ${change > 0 ? "+" : ""}${change} pawns, needs -${minSacrificeValue(signals.rating)} or worse`;
+  }
+  if (signals.loss > REVIEW_THRESHOLDS.excellent) {
+    return `not best or nearly best: loses ${pct(signals.loss)} expected points, limit ${pct(REVIEW_THRESHOLDS.excellent)}`;
+  }
+  if (signals.playedEp < REVIEW_THRESHOLDS.brilliantEqualOrBetter) {
+    return `leaves a bad position: ${pct(signals.playedEp)} expected points, needs ${pct(REVIEW_THRESHOLDS.brilliantEqualOrBetter)}`;
+  }
+  // "Already completely winning without the move". With no alternative line to
+  // judge by, the check is skipped rather than guessed: the old fallback used
+  // the sacrifice's own value, which rejected every sacrifice that wins big.
+  const withoutTheMove = alternativeToPlayed(signals);
+  if (
+    withoutTheMove !== undefined &&
+    withoutTheMove >= REVIEW_THRESHOLDS.brilliantNotAlreadyWinning
+  ) {
+    return `already winning without the sacrifice: the alternative is ${pct(withoutTheMove)}, limit ${pct(REVIEW_THRESHOLDS.brilliantNotAlreadyWinning)}`;
+  }
+  return null;
 }
 
 /**
@@ -256,14 +324,7 @@ export function isPieceSacrifice(
  * completely winning even without the move.
  */
 export function isBrilliantMove(signals: MoveSignals): boolean {
-  if (!signals.material) return false;
-  if (signals.loss > REVIEW_THRESHOLDS.excellent) return false;
-  if (signals.playedEp < REVIEW_THRESHOLDS.brilliantEqualOrBetter) return false;
-  const withoutTheMove = signals.alternativeEp ?? signals.bestEp;
-  if (withoutTheMove >= REVIEW_THRESHOLDS.brilliantNotAlreadyWinning) {
-    return false;
-  }
-  return isPieceSacrifice(signals.material, signals.rating);
+  return brilliantRejection(signals) === null;
 }
 
 /**
@@ -273,10 +334,35 @@ export function isBrilliantMove(signals: MoveSignals): boolean {
  * Needs a second engine line; without one nothing can be called critical.
  */
 export function isGreatMove(signals: MoveSignals): boolean {
-  if (!signals.isBestMove || signals.isRecapture) return false;
-  if (signals.secondBestEp === undefined) return false;
+  return greatRejection(signals) === null;
+}
+
+/** Net material (pawns) won by the move, for the opt-in free-capture rule. */
+function winsMaterialForFree(signals: MoveSignals): boolean {
+  const { material } = signals;
+  if (!material) return false;
+  // The opponent must have just given something away; otherwise a capture that
+  // "wins" material is just the second half of an exchange.
+  if (signals.opponentLoss < SPECIAL_MOVE_RULES.missMinOpponentLoss) {
+    return false;
+  }
+  return material.after - material.before >= SPECIAL_MOVE_RULES.freeCaptureMin;
+}
+
+/** Why a move is NOT Great, or null when it is. See `brilliantRejection`. */
+export function greatRejection(signals: MoveSignals): string | null {
+  if (!signals.isBestMove) return "not the engine's best move";
+  if (signals.isRecapture) return "plain recapture";
   // Finding the only move in an already lost position isn't praised.
-  if (signals.bestEp <= SPECIAL_MOVE_RULES.losingAtMost) return false;
+  if (signals.bestEp <= SPECIAL_MOVE_RULES.losingAtMost) {
+    return `position is already lost: best move leaves ${pct(signals.bestEp)} expected points`;
+  }
+  if (SPECIAL_MOVE_RULES.freeCaptureIsGreat && winsMaterialForFree(signals)) {
+    return null;
+  }
+  if (signals.secondBestEp === undefined) {
+    return "no second engine line (Great needs MultiPV >= 2)";
+  }
 
   const gap = signals.bestEp - signals.secondBestEp;
   const onlyMoveGap = lerp(
@@ -284,12 +370,15 @@ export function isGreatMove(signals: MoveSignals): boolean {
     SPECIAL_MOVE_RULES.greatOnlyMoveGapStrong,
     ratingStrength(signals.rating),
   );
-  if (gap >= onlyMoveGap) return true;
+  if (gap >= onlyMoveGap) return null;
 
   const liftsOutcome =
     BAND_RANK[outcomeBand(signals.bestEp)] >
     BAND_RANK[outcomeBand(signals.secondBestEp)];
-  return liftsOutcome && gap >= SPECIAL_MOVE_RULES.greatOutcomeChangeGap;
+  if (liftsOutcome && gap >= SPECIAL_MOVE_RULES.greatOutcomeChangeGap) {
+    return null;
+  }
+  return `not critical: best move is ${pct(gap)} ahead of the next line, needs ${pct(onlyMoveGap)} (or ${pct(SPECIAL_MOVE_RULES.greatOutcomeChangeGap)} with an outcome change)`;
 }
 
 /**
@@ -326,7 +415,11 @@ export interface MoveEvaluationInput {
   /** Mover's rating. Defaults to DEFAULT_RATING. */
   rating?: number;
   isBook?: boolean;
-  /** Played move equals the engine's top move. Derived from the loss when omitted. */
+  /**
+   * Played move equals the engine's top move. A loss within `bestEpsilon` also
+   * counts as best, so an engine tie or a shallow-depth disagreement on the top
+   * move cannot silently disable Great/Brilliant.
+   */
   isBestMove?: boolean;
   /** Number of legal moves in the position. 1 means Forced. */
   legalMoveCount?: number;
@@ -341,6 +434,12 @@ export interface MoveClassificationResult {
   loss: number;
   bestExpectedPoints: number;
   playedExpectedPoints: number;
+  /**
+   * Why the move was not Brilliant / Great (null = that detector accepted it,
+   * though a higher-precedence class such as Book or Forced can still win).
+   * Use it to trace a missed classification to the exact gate that rejected it.
+   */
+  whyNot: { brilliant: string | null; great: string | null };
 }
 
 export interface ClassifyOptions {
@@ -364,7 +463,8 @@ export function classifyMoveFromEvaluations(
   const bestEp = toEp(input.best, rating);
   const playedEp = toEp(input.played, rating);
   const loss = normalizeLoss(bestEp - playedEp);
-  const isBestMove = input.isBestMove ?? loss <= REVIEW_THRESHOLDS.bestEpsilon;
+  const isBestMove =
+    (input.isBestMove ?? false) || loss <= REVIEW_THRESHOLDS.bestEpsilon;
 
   const signals: MoveSignals = {
     rating,
@@ -381,12 +481,15 @@ export function classifyMoveFromEvaluations(
     material: input.material,
   };
 
+  const brilliantWhyNot = brilliantRejection(signals);
+  const greatWhyNot = greatRejection(signals);
+
   const classification = classifyMove({
     loss,
     isBook: input.isBook ?? false,
     isForced: input.legalMoveCount === 1,
-    isBrilliant: isBrilliantMove(signals),
-    isGreat: isGreatMove(signals),
+    isBrilliant: brilliantWhyNot === null,
+    isGreat: greatWhyNot === null,
     isBestMove,
     isMiss: isMissMove(signals),
   });
@@ -396,5 +499,6 @@ export function classifyMoveFromEvaluations(
     loss,
     bestExpectedPoints: bestEp,
     playedExpectedPoints: playedEp,
+    whyNot: { brilliant: brilliantWhyNot, great: greatWhyNot },
   };
 }

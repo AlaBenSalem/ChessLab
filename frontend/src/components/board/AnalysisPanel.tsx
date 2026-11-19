@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Activity, Cpu } from "lucide-react";
 import type { GameAnalysis } from "../../hooks/useGameAnalysis";
 import { TactileButton } from "../ui/TactileButton";
-import { ReviewSummary } from "./ReviewSummary";
+import { MoveClassificationSummary } from "./MoveClassificationSummary";
 
 /** The part of the engine's evaluation this panel reads. `EngineEvaluation` satisfies it. */
 interface PanelEvaluation {
@@ -78,6 +78,7 @@ export function AnalysisPanel({
     : null;
   const percent = Math.round(Math.min(100, Math.max(0, progress)));
   const activeMove = result?.moves[activePly];
+  const completedReview = Boolean(result && !isAnalyzing);
 
   return (
     <div
@@ -87,13 +88,14 @@ export function AnalysisPanel({
         <h2 className="text-sm font-bold uppercase tracking-[0.16em] text-amber-100/80">
           Game Review
         </h2>
-        {result && (
-          <ReviewSummary
-            white={result.whiteReport}
-            black={result.blackReport}
-          />
-        )}
       </header>
+
+      {result && !isAnalyzing && (
+        <MoveClassificationSummary
+          white={result.whiteReport}
+          black={result.blackReport}
+        />
+      )}
 
       {resultText !== "*" && (
         <p className="shrink-0 text-center text-xs font-semibold text-stone-300">
@@ -107,13 +109,6 @@ export function AnalysisPanel({
         </p>
       )}
 
-      {evalLabel && (
-        <p className="shrink-0 text-center text-xs font-semibold text-stone-300">
-          Evaluation:{" "}
-          <span className="tabular-nums text-amber-100">{evalLabel}</span>
-        </p>
-      )}
-
       {activeMove && (
         <div className="max-h-[4.5rem] shrink-0 overflow-hidden rounded-xl border border-white/5 bg-black/30 px-3 py-2 text-xs leading-5 text-stone-300">
           <p className="truncate font-semibold text-stone-100">
@@ -123,7 +118,7 @@ export function AnalysisPanel({
         </div>
       )}
 
-      <TactileButton
+      {!completedReview && <TactileButton
         onClick={onAnalyzeGame}
         disabled={busy}
         className="w-full shrink-0 py-3 text-base"
@@ -139,7 +134,7 @@ export function AnalysisPanel({
             Game Review
           </>
         )}
-      </TactileButton>
+      </TactileButton>}
       {isAnalyzing && (
         <div
           className="h-1.5 w-full shrink-0 overflow-hidden rounded-full bg-black/40"
@@ -166,7 +161,7 @@ export function AnalysisPanel({
         </button>
       )}
 
-      <TactileButton
+      {!completedReview && <TactileButton
         variant="blue"
         onClick={() => analyzePosition()}
         disabled={busy}
@@ -183,7 +178,7 @@ export function AnalysisPanel({
             Hint
           </>
         )}
-      </TactileButton>
+      </TactileButton>}
 
       {error && (
         <p role="alert" className="shrink-0 text-sm text-red-300">

@@ -1,9 +1,3 @@
-// scripts/build-openings.mjs
-// Reads Lichess ECO TSV (3-column or 5-column) and produces openings.json
-// with a computed FEN for each opening line.
-//
-// Uses chess.js to convert PGN → FEN.
-
 import fs from "node:fs";
 import path from "node:path";
 import { Chess } from "chess.js";

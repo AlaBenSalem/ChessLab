@@ -254,7 +254,7 @@ describe("chess terminal position recognition", () => {
 });
 
 describe("live board move updates", () => {
-  it("navigates history without removing moves from the shared game", () => {
+  it("undoes the active move and allows a replacement move in free play", () => {
     useGameStore.getState().resetGame();
     const before = useGameStore.getState().fen;
     expect(useGameStore.getState().movePiece("e2", "e4")).toBe(true);
@@ -264,10 +264,14 @@ describe("live board move updates", () => {
 
     after.undoMove();
     expect(useGameStore.getState().viewIndex).toBe(-1);
-    expect(useGameStore.getState().moves).toHaveLength(1);
-    expect(useGameStore.getState().chess.get("e4")?.type).toBe("p");
-    useGameStore.getState().redoMove();
-    expect(useGameStore.getState().viewIndex).toBe(0);
-    expect(useGameStore.getState().chess.get("e4")?.type).toBe("p");
+    expect(useGameStore.getState().moves).toHaveLength(0);
+    expect(useGameStore.getState().fen).toBe(before);
+    expect(useGameStore.getState().chess.get("e4")).toBeUndefined();
+    expect(useGameStore.getState().chess.turn()).toBe("w");
+
+    expect(useGameStore.getState().movePiece("d2", "d4")).toBe(true);
+    expect(useGameStore.getState().moves.map((move) => move.san)).toEqual(["d4"]);
+    expect(useGameStore.getState().chess.get("d4")?.type).toBe("p");
+    expect(useGameStore.getState().chess.turn()).toBe("b");
   });
 });

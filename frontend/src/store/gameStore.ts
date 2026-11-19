@@ -133,7 +133,26 @@ export const useGameStore = create<GameState>((set, get) => ({
   previousMove: () => get().setViewIndex(get().viewIndex - 1),
   nextMove: () => get().setViewIndex(get().viewIndex + 1),
   lastMoveInHistory: () => get().setViewIndex(get().moves.length - 1),
-  undoMove: () => get().previousMove(),
+  undoMove: () => {
+    const { chess } = get();
+    if (!chess.undo()) return;
+    chess.header("Result", "*");
+
+    // Undo changes the canonical Chess position and truncates its active history.
+    // Rebuild the public move list from that history so the next move can branch
+    // from this restored position immediately.
+    const startFen = chess.header().FEN ?? new Chess().fen();
+    const moves = numberMoves(chess.history({ verbose: true }), startFen);
+    const viewIndex = moves.length - 1;
+    set({
+      fen: chess.fen(),
+      moves,
+      viewIndex,
+      selectedSquare: null,
+      legalMoves: [],
+      lastMove: currentLastMove(moves, viewIndex),
+    });
+  },
   redoMove: () => get().nextMove(),
 
   loadPgn: (pgn) => {
